@@ -1,5 +1,6 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Pi 消息与内容块没有稳定 id，只能按位置渲染。
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ConversationMessage, StreamingMessage, ToolExecution } from "../../lib/conversation.ts";
 import { IconButton } from "../primitives/IconButton.tsx";
 import { ArrowDownIcon } from "../primitives/icons.tsx";
@@ -180,21 +181,31 @@ function hasActiveSelection(container: HTMLElement): boolean {
 	return container.contains(selection.anchorNode);
 }
 
+// 选区快照：text 为选中文本，其余为选区在视口中的定位，供浮动「引用」按钮定位。
+interface SelectionSnapshot {
+	text: string;
+	top: number;
+	bottom: number;
+	centerX: number;
+}
+
 export interface MessageListProps {
 	messages: ConversationMessage[];
 	streaming: StreamingMessage | null;
 	tools: Record<string, ToolExecution>;
 	forkMessages?: Array<{ entryId: string; text: string }>;
 	onFork?: (entryId: string) => void;
+	onQuote?: (text: string) => void;
 }
 
-export function MessageList({ messages, streaming, tools, forkMessages = [], onFork }: MessageListProps) {
+export function MessageList({ messages, streaming, tools, forkMessages = [], onFork, onQuote }: MessageListProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const contentRef = useRef<HTMLDivElement>(null);
 	// 吸附底部：内容增长即钉到底部，仅用户主动上滚超阈值才解除。用 ref 供 ResizeObserver 回调同步读取。
 	const stickToBottom = useRef(true);
 	const lastScrollTop = useRef(0);
 	const [atBottom, setAtBottom] = useState(true);
+	const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
 	const results = collectToolResults(messages);
 	const forkIds: Array<string | undefined> = [];
 	let userIndex = 0;
@@ -221,9 +232,44 @@ export function MessageList({ messages, streaming, tools, forkMessages = [], onF
 		return () => observer.disconnect();
 	}, []);
 
+	// 拖选会话文本时在选区附近浮出「引用」按钮；仅主会话传入 onQuote，分享/只读页不传即无此交互。
+	useEffect(() => {
+		if (!onQuote) return;
+		let frame: number | undefined;
+		function measure() {
+			frame = undefined;
+			const container = containerRef.current;
+			if (!container) return;
+			const current = window.getSelection();
+			if (!current || current.isCollapsed || !hasActiveSelection(container)) {
+				setSelection(null);
+				return;
+			}
+			const text = current.toString();
+			if (text.trim().length === 0) {
+				setSelection(null);
+				return;
+			}
+			const rect = current.getRangeAt(0).getBoundingClientRect();
+			setSelection({ text, top: rect.top, bottom: rect.bottom, centerX: rect.left + rect.width / 2 });
+		}
+		function onSelectionChange() {
+			// selectionchange 在拖选期间高频触发，用 rAF 合并到每帧一次测量，避免逐次重渲染整列消息。
+			if (frame !== undefined) cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(measure);
+		}
+		document.addEventListener("selectionchange", onSelectionChange);
+		return () => {
+			if (frame !== undefined) cancelAnimationFrame(frame);
+			document.removeEventListener("selectionchange", onSelectionChange);
+		};
+	}, [onQuote]);
+
 	function onScroll() {
 		const container = containerRef.current;
 		if (!container) return;
+		// 滚动会让浮动「引用」按钮定位失效，先隐藏；用户重新选择时再出现。
+		setSelection(null);
 		const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
 		// 仅用户主动上滚（scrollTop 变小）才可能解除吸附；内容增长撑大 distance 不算，避免流式中误判停滚。
 		const scrolledUp = container.scrollTop < lastScrollTop.current - 1;
@@ -272,6 +318,28 @@ export function MessageList({ messages, streaming, tools, forkMessages = [], onF
 					<ArrowDownIcon />
 				</IconButton>
 			)}
+
+			{selection &&
+				onQuote &&
+				createPortal(
+					<button
+						type="button"
+						style={{
+							top: selection.top - 40 >= 8 ? selection.top - 40 : selection.bottom + 8,
+							left: Math.min(Math.max(selection.centerX, 48), window.innerWidth - 48),
+						}}
+						className="fixed z-50 -translate-x-1/2 rounded-dsw-xs border border-hairline border-dsw-border-l1 bg-dsw-bg-base px-2 py-1 text-[11px] text-dsw-label-secondary shadow-dsw-panel hover:text-dsw-label-primary"
+						onMouseDown={(event) => event.preventDefault()}
+						onClick={() => {
+							onQuote(selection.text);
+							window.getSelection()?.removeAllRanges();
+							setSelection(null);
+						}}
+					>
+						引用
+					</button>,
+					document.body,
+				)}
 		</div>
 	);
 }

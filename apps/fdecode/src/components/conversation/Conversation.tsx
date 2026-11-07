@@ -61,6 +61,7 @@ export function Conversation({
 	const [commands, setCommands] = useState<CommandSummary[]>([]);
 	const [forkMessages, setForkMessages] = useState<Array<{ entryId: string; text: string }>>([]);
 	const [initialDraft, setInitialDraft] = useState("");
+	const [quote, setQuote] = useState<{ text: string } | null>(null);
 	const [issue, setIssue] = useState<{ number: number; title: string; url: string; repoId: string } | null>(null);
 	const [ci, setCi] = useState<CiStatus | null>(null);
 	const [timeline, setTimeline] = useState<MechanismEvent[]>([]);
@@ -411,6 +412,9 @@ export function Conversation({
 		]);
 	}, []);
 
+	// 每次生成新对象，Composer 的 [quote] effect 依赖对象身份变化触发追加，重复引用同段文本也能再次插入。
+	const handleQuote = useCallback((text: string) => setQuote({ text }), []);
+
 	const streaming = conversation.status === "streaming";
 	const empty = conversation.messages.length === 0 && !streaming;
 
@@ -452,6 +456,7 @@ export function Conversation({
 					tools={conversation.tools}
 					forkMessages={readOnly ? [] : forkMessages}
 					onFork={readOnly ? undefined : (entryId) => void handleFork(entryId)}
+					onQuote={readOnly ? undefined : handleQuote}
 				/>
 			)}
 
@@ -468,6 +473,7 @@ export function Conversation({
 						supportsImages={model?.input?.includes("image") ?? false}
 						commands={commands}
 						initialDraft={initialDraft}
+						quote={quote}
 						attachments={attachments}
 						onAttachmentsChange={setAttachments}
 						onSearchFiles={(query) => (activeId ? searchProjectFiles(activeId, query) : Promise.resolve([]))}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FileCandidate } from "../../lib/api.ts";
 import { type ImageAttachment, prepareImage, releaseImage } from "../../lib/images.ts";
+import { formatQuote } from "../../lib/quote.ts";
 import { IconButton } from "../primitives/IconButton.tsx";
 import { ImageIcon, SendIcon, StopIcon } from "../primitives/icons.tsx";
 
@@ -19,6 +20,7 @@ export interface ComposerProps {
 	supportsImages: boolean;
 	commands: CommandSummary[];
 	initialDraft?: string;
+	quote?: { text: string } | null;
 	attachments: ImageAttachment[];
 	onAttachmentsChange: (next: ImageAttachment[]) => void;
 	onSearchFiles: (query: string) => Promise<FileCandidate[]>;
@@ -68,6 +70,7 @@ export function Composer({
 	supportsImages,
 	commands,
 	initialDraft,
+	quote,
 	attachments,
 	onAttachmentsChange,
 	onSearchFiles,
@@ -82,11 +85,25 @@ export function Composer({
 	const [sending, setSending] = useState(false);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const pendingCaretEnd = useRef(false);
 
 	useEffect(() => {
 		if (!initialDraft) return;
 		setValue((current) => (current.length === 0 ? initialDraft : current));
 	}, [initialDraft]);
+
+	// 引用选中内容：quote 每次为新对象即触发，把格式化后的引用块追加到当前输入并聚焦。
+	useEffect(() => {
+		if (!quote) return;
+		const block = formatQuote(quote.text);
+		if (block.length === 0) return;
+		setValue((current) => {
+			const base = current.trimEnd();
+			return base.length === 0 ? `${block}\n\n` : `${base}\n\n${block}\n\n`;
+		});
+		pendingCaretEnd.current = true;
+		textareaRef.current?.focus();
+	}, [quote]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 输入变化后需要重新计算 textarea 高度。
 	useEffect(() => {
@@ -94,6 +111,12 @@ export function Composer({
 		if (!textarea) return;
 		textarea.style.height = "auto";
 		textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`;
+		// 引用插入后把光标移到末尾；等 DOM value 提交后再定位，避免与用户输入抢光标。
+		if (pendingCaretEnd.current) {
+			pendingCaretEnd.current = false;
+			textarea.selectionStart = textarea.value.length;
+			textarea.selectionEnd = textarea.value.length;
+		}
 	}, [value]);
 
 	useEffect(() => {
