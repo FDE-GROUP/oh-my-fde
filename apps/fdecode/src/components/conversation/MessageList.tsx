@@ -167,10 +167,17 @@ function StreamingRow({ streaming }: { streaming: StreamingMessage }) {
 			<div className="flex flex-col gap-2 px-1">
 				<ThinkingBlock thinking={streaming.thinking} />
 				{streaming.text.length > 0 && <Markdown text={streaming.text} />}
-				{empty && <p className="animate-pulse text-sm text-dsw-label-tertiary">正在思考…</p>}
+				{empty && <p className="motion-safe:animate-pulse text-sm text-dsw-label-tertiary">正在思考…</p>}
 			</div>
 		</article>
 	);
+}
+
+// 用户正在会话容器内拖选文本时暂停吸附，避免流式增量把选中内容滚走（复制/阅读体验）。
+function hasActiveSelection(container: HTMLElement): boolean {
+	const selection = window.getSelection();
+	if (!selection || selection.isCollapsed) return false;
+	return container.contains(selection.anchorNode);
 }
 
 export interface MessageListProps {
@@ -183,7 +190,11 @@ export interface MessageListProps {
 
 export function MessageList({ messages, streaming, tools, forkMessages = [], onFork }: MessageListProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
-	const [nearBottom, setNearBottom] = useState(true);
+	const contentRef = useRef<HTMLDivElement>(null);
+	// 吸附底部：内容增长即钉到底部，仅用户主动上滚超阈值才解除。用 ref 供 ResizeObserver 回调同步读取。
+	const stickToBottom = useRef(true);
+	const lastScrollTop = useRef(0);
+	const [atBottom, setAtBottom] = useState(true);
 	const results = collectToolResults(messages);
 	const forkIds: Array<string | undefined> = [];
 	let userIndex = 0;
@@ -198,24 +209,38 @@ export function MessageList({ messages, streaming, tools, forkMessages = [], onF
 		}
 	}
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 新消息或流式增量到达时触发滚动。
+	// 流式增量、新消息与 Markdown 内异步高度变化都会改变内容尺寸；吸附时同步钉到底部，确保新输出可见。
 	useEffect(() => {
 		const container = containerRef.current;
-		if (!container || !nearBottom) return;
-		container.scrollTop = container.scrollHeight;
-	}, [messages, streaming, nearBottom]);
+		const content = contentRef.current;
+		if (!container || !content) return;
+		const observer = new ResizeObserver(() => {
+			if (stickToBottom.current && !hasActiveSelection(container)) container.scrollTop = container.scrollHeight;
+		});
+		observer.observe(content);
+		return () => observer.disconnect();
+	}, []);
 
 	function onScroll() {
 		const container = containerRef.current;
 		if (!container) return;
 		const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
-		setNearBottom(distance < 96);
+		// 仅用户主动上滚（scrollTop 变小）才可能解除吸附；内容增长撑大 distance 不算，避免流式中误判停滚。
+		const scrolledUp = container.scrollTop < lastScrollTop.current - 1;
+		lastScrollTop.current = container.scrollTop;
+		if (scrolledUp && distance >= 96) {
+			stickToBottom.current = false;
+			setAtBottom(false);
+		} else if (distance < 96) {
+			stickToBottom.current = true;
+			setAtBottom(true);
+		}
 	}
 
 	return (
 		<div className="relative min-h-0 flex-1">
 			<div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto px-4 py-6">
-				<div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+				<div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col gap-6">
 					{messages.map((message, index) => (
 						<MessageRow
 							key={index}
@@ -231,15 +256,17 @@ export function MessageList({ messages, streaming, tools, forkMessages = [], onF
 				</div>
 			</div>
 
-			{!nearBottom && (
+			{!atBottom && (
 				<IconButton
 					label="回到底部"
 					className="absolute bottom-4 left-1/2 -translate-x-1/2 border border-hairline border-dsw-border-l1 bg-dsw-bg-base shadow-dsw-panel"
 					onClick={() => {
 						const container = containerRef.current;
 						if (!container) return;
+						stickToBottom.current = true;
 						container.scrollTop = container.scrollHeight;
-						setNearBottom(true);
+						lastScrollTop.current = container.scrollTop;
+						setAtBottom(true);
 					}}
 				>
 					<ArrowDownIcon />

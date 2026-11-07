@@ -89,7 +89,7 @@ export function ToolCard({ callId, name, args, execution, result }: ToolCardProp
 				<span
 					className={clsx(
 						"size-1.5 rounded-full",
-						status === "running" && "animate-pulse bg-dsw-state-business",
+						status === "running" && "motion-safe:animate-pulse bg-dsw-state-business",
 						status === "error" && "bg-dsw-state-error",
 						status === "done" && "bg-dsw-state-success",
 					)}

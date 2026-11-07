@@ -106,7 +106,7 @@ function SessionItem({
 					<span
 						className={
 							busy
-								? "size-1.5 shrink-0 animate-pulse rounded-full bg-dsw-state-business"
+								? "size-1.5 shrink-0 motion-safe:animate-pulse rounded-full bg-dsw-state-business"
 								: "size-1.5 shrink-0 rounded-full bg-dsw-border-l3"
 						}
 					/>

@@ -444,7 +444,9 @@ export function Conversation({
 					<ConversationPlaceholder health={health} />
 				</div>
 			) : (
+				// key 绑定 activeId：切换会话时重挂载 MessageList，重置“吸附底部”的跟随状态。
 				<MessageList
+					key={activeId ?? "conversation"}
 					messages={conversation.messages}
 					streaming={conversation.streaming}
 					tools={conversation.tools}
